@@ -129,17 +129,20 @@ In the far right click on the `Gradle` tab and in `intellij` folder execute `run
 
 ![FlutterBlocklyPlus file](./images/createjetbrainlanguagepugin_icon_in_ide.png)
 
-## Step 6: Code analysis
+## Step 6: Parser
 
 Now that we have our language set up, we need to analyse the code. It's a neccessity to have auto-completion and other features that will help us to write our "special javascript" code.
 
-But how can we do that ? Well, let's do some theory first.
+### How it works
 
-To analyse code Jetbrain IDEs use a tool called PSI (Program Structure Interface). It's a layer of the IDE that parse the code and create a tree of the code structure. This tree is called AST (Abstract Syntax Tree). Here the analysis process :
+But how can we do that ? With a parser ! Well, let's do some theory first.
 
-![Code analysis](./images/createjetbrainlanguagepugin_code_analysis.png)
+To analyse code Jetbrain IDEs use a tool called PSI (Program Structure Interface). It's a layer of the IDE that parse the code and create a tree of the code structure. This tree is called AST (Abstract Syntax Tree).
 
-As you can see, the code go through a lexer that split the code into tokens. Then the parser will create the AST.
+First, the code go through a lexer that split the code into tokens. Then the parser will create the AST.
+
+    Side note : the parser can mean the whole process or just the part that create the AST. 
+
 To better understand how it works, let's take an example. Let's say we have the following code :
 
 ```js
@@ -149,13 +152,8 @@ a = 1 + 2
 Firstly, our code will go through something called lexer. The lexer will split the code into tokens. In our case it will split the code into elements and convert them into tokens. :
 
 ```js
-a, =, 1, +, 2 // THe lexer isolate each elements
-
-// The lexer convert the elements into tokens
 IDENTIFIER(a), ASSIGN(=), NUMBER(1), PLUS(+), NUMBER(2)
 ```
-
-![Lexer](./images/createjetbrainlanguagepugin_lexer.png)
 
 After the lexer, the parser will create the AST. The AST is a tree that represent the structure of the code. In our case it will look like this :
 
@@ -166,13 +164,73 @@ IDENTIFIER(a)       PLUS
                     /   \
                 NUMBER(1) NUMBER(2)
 ```
-    
-![AST](./images/createjetbrainlanguagepugin_parser.png)
 
-Here's the whole process
+Here's the whole process :
 
-![final process](./images/createjetbrainlanguagepugin_final_process.png)
+![final process](./images/createjetbrainlanguagepugin_ast_process.png)
 
 Once you have the AST you can analyse the code and do whatever you want with it, like auto-completion, error detection, etc.
 
-Now that we know how it works, let's implement it.
+Now that we know how it works, let's implement it. In jetbrain, the class that contain the whole parser is the `ParserDefinition` class.
+
+```kotlin
+class FBPParserDefinition: ParserDefinition {
+
+    val FILE: IFileElementType = IFileElementType(FBPLanguage.INSTANCE)
+
+    override fun createLexer(p0: Project?): Lexer {
+        return FBPLexerAdapter()
+    }
+
+    override fun createParser(p0: Project?): PsiParser {
+        return FBPParser()
+    }
+
+    override fun getFileNodeType(): IFileElementType {
+        return FILE
+    }
+
+    override fun getCommentTokens(): TokenSet {
+        return FBPTokenSet.COMMENTS
+    }
+
+    override fun getStringLiteralElements(): TokenSet {
+        return TokenSet.EMPTY
+    }
+
+    override fun createElement(p0: ASTNode?): PsiElement {
+        return FBPTypes.Factory.createElement(p0)
+    }
+
+    override fun createFile(p0: FileViewProvider): PsiFile {
+        return FBPFile(p0)
+    }
+
+
+}
+```
+
+Don't worry about all those classes that are not defined yet. We will go step by step.
+
+### Tokens and elements
+
+We will start by creating the tokenType and the element types. If what a tokenType is can be easily understood, an element type is a generic type that represent all different types of elements in the PSI. A token is an element, the file that define the whole parser is an element, etc.
+
+[More information about elements here](https://plugins.jetbrains.com/docs/intellij/psi-elements.html)
+
+so let's create an element, I personnaly put thoses files in a `psi` directory. 
+```kotlin
+class FBPElementType(debugName: String) : IElementType(debugName, FBPLanguage.INSTANCE) {}
+```
+
+Let's also create a token type. As said before, a token is an element, so it will inherite from `FBPElementType` (and not FBPElementType !).
+```kotlin
+class FBPTokenType(debugName: String) : IElementType(debugName, FBPLanguage.INSTANCE) {
+    override fun toString(): String {
+        return "FBPTokenType." + super.toString()
+    }
+}
+```
+
+Now that our types are defined, we can define our parser. For that we will write a BNF (Backus-Naur Form) file that will define the structure of our language.
+
