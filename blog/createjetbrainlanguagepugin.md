@@ -1,4 +1,4 @@
-# How to create your own language plugin for Jetbrains IDEs
+# How to create your own language plugin for Jetbrains IDEs (part 1)
 
 To set the context, I'm working on a flutter project that use blockly. The thing is that blockly is a javascript library. First thing I did was to search a lib that could help me to use blockly in flutter. I found a package called [flutter_blockly](https://pub.dev/packages/flutter_blockly) that is a wrapper for blockly.
 
@@ -7,6 +7,8 @@ The problem is that this package lack a lot of features that I need. So I decide
 Now when you want to inject javascript into the webview that contain blockly you have to do it either by using a file or by using a string directly in the dart code. In both cases you will lack auto-completion and other usefull developement features and it's unconvenient.
 
 All that lead to the current day where I decided to create a plugin for Jetbrains IDEs that will help me to write the javascript code that I will inject into the webview.
+
+In this part we will focus on the creation of the AST (Abstract Syntax Tree).
 
 ## Step 1: Install the necessary tools
 
@@ -387,7 +389,7 @@ Now let's define the variables (do not forget the `%%` wetween the imports and t
 %eof{  return;
 %eof}
 
-%state WAITING_VALUE
+%state WAITING_SEPARATOR
 ```
 * `%class` : The name of the class that will be generated.
 * `%implements` : The interfaces that the class will implement.
@@ -398,7 +400,7 @@ Now let's define the variables (do not forget the `%%` wetween the imports and t
 
 * `%state` : A state of the lexer.
 
-You might wonder what is a state ? Well a state is a way to define different rules for the lexer. For exemple, when the lexer is in the `WAITING_VALUE` state, it will not use the same rules as when it's in the default state. You can see them like a container of rules. You can define as many states as you want. The initial state the lexer is in is `<YYINITIAL>`.
+You might wonder what is a state ? Well a state is a way to define different rules for the lexer. For exemple, when the lexer is in the `WAITING_SEPARATOR` state, it will not use the same rules as when it's in the default state. You can see them like a container of rules. You can define as many states as you want. The initial state the lexer is in is `<YYINITIAL>`.
 
 ![Lexer state](./images/createjetbrainlanguagepugin_lexer_state.png)
 
@@ -421,7 +423,7 @@ Let's with a simple example. Let's say that we want to define a rule that will m
 * `[^\n]*` : Any character that is not a new line.
 * `{ return FBPTypes.COMMENT; }` : Return the token type of the comment.
 
-For now we don't use the `WAITING_VALUE` state, but we will come back to it later. For now here is the whole lexer :
+For now we don't use the `WAITING_SEPARATOR` state, but we will come back to it later. For now here is the whole lexer :
 
 ```flex
 package com.pebloop.flutterblocklyplus;
@@ -441,10 +443,195 @@ import com.intellij.psi.TokenType;
 %eof{  return;
 %eof}
 
-%state WAITING_VALUE
+%state WAITING_SEPARATOR
 %%
 
 <YYINITIAL> {
   "//" [^\n]* { return FBPTypes.COMMENT; }
 }
 ```
+
+Finally, we need to generate the lexer. Right click on the flex file and click on `Run JFlex Generator`. A new file will be created in the `src/main/gen` directory.
+
+![Generated lexer](./images/createjetbrainlanguagepugin_generated_lexer.png)
+
+To have your lexer working with jetbrain, you need to create a LexerAdapter that will adapt the generated lexer to the jetbrain lexer.
+
+```kotlin
+package com.pebloop.flutterblocklyplus
+
+import com.intellij.lexer.FlexAdapter
+
+class FBPLexerAdapter(): FlexAdapter(FBPLexer(null)) {
+}
+```
+
+Congratulation ! You have now a working lexer!
+
+### Final touch
+
+We're nearly done ! We need to create the root of all those tokens : the root file. This file will be the root of our AST and represent a file (like test.FBP).
+
+```kotlin
+package com.pebloop.flutterblocklyplus
+
+import com.intellij.extapi.psi.PsiFileBase
+import com.intellij.openapi.fileTypes.FileType
+import com.intellij.psi.FileViewProvider
+
+class FBPFile(viewProvider: FileViewProvider): PsiFileBase(viewProvider, FBPLanguage.INSTANCE) {
+    override fun getFileType(): FileType {
+        return FBPFileType.INSTANCE
+    }
+
+    override fun toString(): String {
+        return "FBP File"
+    }
+
+}
+```
+
+Now, let's define the tokens we created by generating the parser. The type you saw in the FBPTypes generated file are just constants. We need to create the real tokens. For now we just have the COMMENT token, but we will add the others later.
+
+```kotlin
+interface FBPTokenSet {
+    companion object {
+        val COMMENTS : TokenSet = TokenSet.create(FBPTypes.COMMENT);
+    }
+}
+```
+
+Finaly, with all those classes we created, we can now define the parser definition :
+
+```kotlin
+class FBPParserDefinition: ParserDefinition {
+
+    val FILE: IFileElementType = IFileElementType(FBPLanguage.INSTANCE)
+
+    override fun createLexer(p0: Project?): Lexer {
+        return FBPLexerAdapter()
+    }
+
+    override fun createParser(p0: Project?): PsiParser {
+        return FBPParser()
+    }
+
+    override fun getFileNodeType(): IFileElementType {
+        return FILE
+    }
+
+    override fun getCommentTokens(): TokenSet {
+        return FBPTokenSet.COMMENTS
+    }
+
+    override fun getStringLiteralElements(): TokenSet {
+        return TokenSet.EMPTY
+    }
+
+    override fun createElement(p0: ASTNode?): PsiElement {
+        return FBPTypes.Factory.createElement(p0)
+    }
+
+    override fun createFile(p0: FileViewProvider): PsiFile {
+        return FBPFile(p0)
+    }
+}
+```
+
+Now register the parser definition in the `plugin.xml` file :
+
+```xml
+<lang.parserDefinition
+                language="FlutterBlocklyPlus"
+                implementationClass="com.pebloop.flutterblocklyplus.FBPParserDefinition"/>
+```
+
+Aaaaaand we're done ! You can now test your language in the IDE !
+
+## Step 7: Try it !
+
+Run the IDE and create a new file with the extension you defined in the file type. You should see the icon you defined in the file type.
+Install the plugin `psiViewer` to see the AST of your code. Now write a comment and you can see your AST on the right !
+
+![AST](./images/createjetbrainlanguagepugin_ast.png)
+
+## Step 8: Complete the Lexer
+
+Now that everything is set up you can easily complete the lexer. You can add the other tokens we defined in the BNF file. For exemple, the `EQ` token that represent the equal sign. Let's also add the white spaces, the new lines and the bad characters.
+
+```flex
+<YYINITIAL> {
+  "//" [^\n]* { return FBPTypes.COMMENT; } // Single line comment
+}
+
+<WAITING_SEPARATOR> {
+    "=" { return FBPTypes.EQ; } // Equal
+}
+
+[ \t\n\r]+ { return TokenType.WHITE_SPACE; } // Whitespace
+\R { return TokenType.WHITE_SPACE; } // Newline
+[^] { return TokenType.BAD_CHARACTER; } // Any other character
+```
+
+If you try the '=' now it won't work. That's because its in the `WAITING_SEPARATOR` state. To change the state, you need to call the `yybegin` function. Let's create our identifier in the `YYINITIAL` state and make it change the state when it's called.
+```flex
+[a-zA-Z_][a-zA-Z0-9_]* { yybegin(WAITING_SEPARATOR); return FBPTypes.IDENTIFIER; } // Identifier
+```
+
+Now if you try the code `a =` you will see that the `a` is recognized as an identifier and the `=` is recognized as an equal sign, but if you just write `=` it won't be recognized.
+
+Let's add the `PRIMITIVE` token that will represent a number. Add a `WAINTING_VALUE` state and add the rule for the number.
+```flex
+<WAITING_VALUE> {
+    [0-9]+ { return FBPTypes.PRIMITIVE; } // Number
+}
+```
+
+Here's the entire lexer for reference, don't forget to generate the lexer !
+```flex
+package com.pebloop.flutterblocklyplus;
+
+import com.intellij.lexer.FlexLexer;
+import com.intellij.psi.tree.IElementType;
+import com.pebloop.flutterblocklyplus.psi.FBPTypes;
+import com.intellij.psi.TokenType;
+
+%%
+
+%class FBPLexer
+%implements FlexLexer
+%unicode
+%function advance
+%type IElementType
+%eof{  return;
+%eof}
+
+%state WAITING_SEPARATOR
+%state WAITING_VALUE
+%%
+
+<YYINITIAL> {
+  "//" [^\n]* { return FBPTypes.COMMENT; } // Single line comment
+  [a-zA-Z_][a-zA-Z0-9_]* { yybegin(WAITING_SEPARATOR); return FBPTypes.IDENTIFIER; } // Identifier
+}
+
+<WAITING_SEPARATOR> {
+    "=" { return FBPTypes.EQ; } // Equal
+}
+
+<WAITING_VALUE> {
+    [0-9]+ { return FBPTypes.PRIMITIVE; } // Number
+}
+
+[ \t\n\r]+ { return TokenType.WHITE_SPACE; } // Whitespace
+\R { return TokenType.WHITE_SPACE; } // Newline
+[^] { return TokenType.BAD_CHARACTER; } // Any other character
+```
+
+## Conclusion
+
+This is where we finish the first part of the creation of a language plugin for Jetbrains IDEs. We saw how to create a language, a file type, a parser, a lexer and how to generate the AST and view it. In the next part we will see how to analyse the AST and how to create a code completion.
+
+In the meantime you can expand your language through the Lexer and the parser.
+
+Bye bye and have fun coding !
