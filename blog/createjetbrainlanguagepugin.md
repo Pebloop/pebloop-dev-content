@@ -387,14 +387,6 @@ Now let's define the variables (do not forget the `%%` wetween the imports and t
 %eof{  return;
 %eof}
 
-CRLF=\R
-WHITE_SPACE=[\ \n\t\f]
-FIRST_VALUE_CHARACTER=[^ \n\f\\] | "\\"{CRLF} | "\\".
-VALUE_CHARACTER=[^\n\f\\] | "\\"{CRLF} | "\\".
-END_OF_LINE_COMMENT=("#"|"!")[^\r\n]*
-SEPARATOR=[:=]
-KEY_CHARACTER=[^:=\ \n\t\f\\] | "\\ "
-
 %state WAITING_VALUE
 ```
 * `%class` : The name of the class that will be generated.
@@ -404,17 +396,55 @@ KEY_CHARACTER=[^:=\ \n\t\f\\] | "\\ "
 * `%type` : The type of the token.
 * `%eof` : The function that will be called when the lexer reach the end of the file.
 
-* `CRLF` : A new line.
-* `WHITE_SPACE` : A white space.
-* `FIRST_VALUE_CHARACTER` : The first character of a value.
-* `VALUE_CHARACTER` : A character of a value.
-* `END_OF_LINE_COMMENT` : A comment.
-* `SEPARATOR` : A separator.
-* `KEY_CHARACTER` : A character of a key.
+* `%state` : A state of the lexer.
 
-* `%state` : The state of the lexer.
+You might wonder what is a state ? Well a state is a way to define different rules for the lexer. For exemple, when the lexer is in the `WAITING_VALUE` state, it will not use the same rules as when it's in the default state. You can see them like a container of rules. You can define as many states as you want. The initial state the lexer is in is `<YYINITIAL>`.
 
-Now let's define the rules.
+![Lexer state](./images/createjetbrainlanguagepugin_lexer_state.png)
+
+Now let's define the rules, the format of the rules is the following :
+```flex
+<STATE> {
+  expr1   { action1 }
+  expr2   { action2 }
+}
+```
+
+Let's with a simple example. Let's say that we want to define a rule that will match a comment. A comment start with `//` and end with a new line. So the rule will be :
+```flex
+<YYINITIAL> {
+  "//" [^\n]* { return FBPTypes.COMMENT; }
+}
+```
+* `<YYINITIAL>` : The initial state of the lexer.
+* `"//"` : The start of the comment.
+* `[^\n]*` : Any character that is not a new line.
+* `{ return FBPTypes.COMMENT; }` : Return the token type of the comment.
+
+For now we don't use the `WAITING_VALUE` state, but we will come back to it later. For now here is the whole lexer :
 
 ```flex
+package com.pebloop.flutterblocklyplus;
 
+import com.intellij.lexer.FlexLexer;
+import com.intellij.psi.tree.IElementType;
+import com.pebloop.flutterblocklyplus.psi.FBPTypes;
+import com.intellij.psi.TokenType;
+
+%%
+
+%class FBPLexer
+%implements FlexLexer
+%unicode
+%function advance
+%type IElementType
+%eof{  return;
+%eof}
+
+%state WAITING_VALUE
+%%
+
+<YYINITIAL> {
+  "//" [^\n]* { return FBPTypes.COMMENT; }
+}
+```
